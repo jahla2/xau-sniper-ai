@@ -31,18 +31,19 @@ class Candle(BaseModel):
 
 class MarketSnapshot(BaseModel):
     symbol: str = "XAUUSD"
+    timeframe: Literal["M5"] = "M5"
     bid: float
     ask: float
     spread: float | None = None
-    m1: list[Candle]
     m5: list[Candle]
-    m15: list[Candle]
-    h1: list[Candle]
 
     @model_validator(mode="after")
-    def derive_spread(self) -> "MarketSnapshot":
+    def validate_market(self) -> "MarketSnapshot":
         if self.ask < self.bid:
             raise ValueError("ask must be >= bid")
+        normalized = "".join(ch for ch in self.symbol.upper() if ch.isalnum())
+        if not normalized.startswith("XAUUSD"):
+            raise ValueError("XAU Sniper AI only accepts gold / XAUUSD symbols")
         if self.spread is None:
             self.spread = self.ask - self.bid
         return self
@@ -60,7 +61,8 @@ class FVG(BaseModel):
 
 
 class StructureState(BaseModel):
-    htf_bias: Literal["bullish", "bearish", "neutral"]
+    timeframe: Literal["M5"] = "M5"
+    trend: Literal["bullish", "bearish", "neutral"]
     liquidity_sweep: Literal["sell_side", "buy_side", "none"]
     choch: Literal["bullish", "bearish", "none"]
     bos: Literal["bullish", "bearish", "none"]
@@ -68,6 +70,7 @@ class StructureState(BaseModel):
     last_swing_high: float | None = None
     last_swing_low: float | None = None
     sweep_price: float | None = None
+    sweep_ts: int | None = None
 
 
 class TradePlan(BaseModel):
@@ -106,6 +109,8 @@ class AnalyzeRequest(BaseModel):
 
 
 class AnalyzeResponse(BaseModel):
+    strategy: str = "XAUUSD_M5_SMC_ICT"
+    summary: str
     plan: TradePlan
     approved: bool
     rejection_reasons: list[str] = Field(default_factory=list)
