@@ -6,7 +6,7 @@ from helpers import trend
 
 def plan() -> TradePlan:
     structure = StructureState(
-        htf_bias="bullish",
+        trend="bullish",
         liquidity_sweep="sell_side",
         choch="bullish",
         bos="bullish",
@@ -27,7 +27,7 @@ def plan() -> TradePlan:
 
 def market(spread: float) -> MarketSnapshot:
     bars = trend(90, 12, 0.4)
-    return MarketSnapshot(symbol="XAUUSD", bid=100, ask=100+spread, m1=bars, m5=bars, m15=bars, h1=bars)
+    return MarketSnapshot(symbol="XAUUSD", timeframe="M5", bid=100, ask=100+spread, m5=bars)
 
 
 def test_rejects_wide_spread():
