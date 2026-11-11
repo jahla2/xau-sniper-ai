@@ -16,6 +16,30 @@ def test_ea_has_demo_live_gate_and_webrequest_contract():
     assert "real-account trade blocked" in text
 
 
+def test_ea_is_gold_m5_only_and_analyzes_realtime():
+    text = source()
+    assert "IsGoldSymbol()" in text
+    assert "_Period != PERIOD_M5" in text
+    assert 'payload += "\"timeframe\":\"M5\",";' in text
+    assert "PERIOD_M1" not in text
+    assert "PERIOD_M15" not in text
+    assert "PERIOD_H1" not in text
+    assert "AnalyzeAndMaybeTrade(new_closed_m5)" in text
+    assert "Only a newly closed M5 candle may execute" in text
+
+
+def test_ea_has_visible_chart_dashboard():
+    text = source()
+    assert "UpdateDashboard" in text
+    assert "XAU SNIPER AI | GOLD M5 ONLY" in text
+    assert "M5 Trend:" in text
+    assert "Sweep:" in text
+    assert "CHoCH:" in text
+    assert "BOS:" in text
+    assert "FVG:" in text
+    assert "Reason:" in text
+
+
 def test_ea_has_entry_sl_tp_and_duplicate_controls():
     text = source()
     assert "trade.BuyLimit" in text
