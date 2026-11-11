@@ -1,6 +1,6 @@
 #property strict
-#property version   "0.20"
-#property description "XAU Sniper AI - demo-first MT5 execution layer"
+#property version   "0.30"
+#property description "XAU Sniper AI - XAUUSD M5 realtime analyzer + demo-first execution"
 
 #include <Trade/Trade.mqh>
 
@@ -19,10 +19,7 @@ input int    InpMaxOpenPositions       = 1;
 input double InpMaxDailyLossPct        = 2.0;
 input int    InpPollSeconds            = 5;
 input int    InpHttpTimeoutMs          = 5000;
-input int    InpM1Bars                 = 60;
-input int    InpM5Bars                 = 60;
-input int    InpM15Bars                = 40;
-input int    InpH1Bars                 = 24;
+input int    InpM5Bars                 = 120;
 input int    InpPendingExpiryBars      = 3;
 input double InpTp1RR                  = 2.0;
 input double InpPartialClosePercent    = 50.0;
@@ -39,9 +36,17 @@ struct TradeSignal
    double stop_loss;
    double take_profit_1;
    double take_profit_2;
+   string summary;
+   string trend;
+   string liquidity_sweep;
+   string choch;
+   string bos;
+   string fvg_side;
+   double fvg_low;
+   double fvg_high;
 };
 
-datetime g_last_closed_m1 = 0;
+datetime g_last_closed_m5 = 0;
 string   g_last_signal_key = "";
 bool     g_api_ok = false;
 
@@ -61,6 +66,18 @@ int OnInit()
    if(InpPollSeconds < 1)
       return INIT_PARAMETERS_INCORRECT;
 
+   if(!IsGoldSymbol())
+   {
+      Print("XAU Sniper AI: this EA only supports XAUUSD / Gold symbols. Current symbol=", _Symbol);
+      return INIT_PARAMETERS_INCORRECT;
+   }
+
+   if(_Period != PERIOD_M5)
+   {
+      Print("XAU Sniper AI: attach this EA to an M5 chart only. Current timeframe=", EnumToString((ENUM_TIMEFRAMES)_Period));
+      return INIT_PARAMETERS_INCORRECT;
+   }
+
    EventSetTimer(InpPollSeconds);
 
    if((bool)MQLInfoInteger(MQL_TESTER))
@@ -78,13 +95,15 @@ int OnInit()
    if(IsRealAccount() && !InpAllowLiveTrading)
       Print("XAU Sniper AI: REAL account detected. Auto execution is BLOCKED until AllowLiveTrading=true.");
 
-   Print("XAU Sniper AI initialized on ", _Symbol, ". Demo-first auto trading=", InpEnableAutoTrading ? "ON" : "OFF");
+   Print("XAU Sniper AI initialized on ", _Symbol, " M5. Realtime monitor every ", InpPollSeconds, "s. Demo-first auto trading=", InpEnableAutoTrading ? "ON" : "OFF");
+   Comment("XAU SNIPER AI M5\nAPI: ", g_api_ok ? "CONNECTED" : "DISCONNECTED", "\nWaiting for realtime M5 analysis...");
    return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+   Comment("");
 }
 
 void OnTick()
@@ -100,21 +119,27 @@ void OnTimer()
    if((bool)MQLInfoInteger(MQL_TESTER))
       return;
 
-   datetime closed_m1 = iTime(_Symbol, PERIOD_M1, 1);
-   if(closed_m1 <= 0 || closed_m1 == g_last_closed_m1)
+   datetime closed_m5 = iTime(_Symbol, PERIOD_M5, 1);
+   if(closed_m5 <= 0)
       return;
 
-   g_last_closed_m1 = closed_m1;
+   bool new_closed_m5 = (closed_m5 != g_last_closed_m5);
+   if(new_closed_m5)
+      g_last_closed_m5 = closed_m5;
 
    if(!g_api_ok)
       g_api_ok = CheckApiHealth();
    if(!g_api_ok)
+   {
+      Comment("XAU SNIPER AI M5\nAPI: DISCONNECTED\nNo trade while API is unavailable.");
       return;
+   }
 
-   AnalyzeAndMaybeTrade();
+   // Analyze every poll for realtime terminal/Python logs. Only a newly closed M5 candle may execute a fresh trade.
+   AnalyzeAndMaybeTrade(new_closed_m5);
 }
 
-bool AnalyzeAndMaybeTrade()
+bool AnalyzeAndMaybeTrade(const bool allow_execution)
 {
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol, tick))
@@ -126,7 +151,7 @@ bool AnalyzeAndMaybeTrade()
    string payload;
    if(!BuildAnalyzePayload(tick, payload))
    {
-      Print("XAU Sniper AI: unable to build analysis payload. Need enough closed candles on all timeframes.");
+      Print("XAU Sniper AI: unable to build M5 analysis payload. Need enough closed M5 candles.");
       return false;
    }
 
@@ -147,13 +172,21 @@ bool AnalyzeAndMaybeTrade()
       return false;
    }
 
-   PrintFormat("XAU Sniper AI: action=%s approved=%s confidence=%d entry_type=%s entry=%.2f SL=%.2f TP1=%.2f TP2=%.2f",
+   UpdateDashboard(signal, tick, allow_execution);
+   PrintFormat("XAU Sniper AI M5: trend=%s sweep=%s CHoCH=%s BOS=%s FVG=%s %.2f-%.2f | action=%s approved=%s confidence=%d entry=%.2f SL=%.2f TP1=%.2f TP2=%.2f | %s",
+               signal.trend, signal.liquidity_sweep, signal.choch, signal.bos,
+               signal.fvg_side, signal.fvg_low, signal.fvg_high,
                signal.action, signal.approved ? "true" : "false", signal.confidence,
-               signal.entry_type, signal.entry, signal.stop_loss,
-               signal.take_profit_1, signal.take_profit_2);
+               signal.entry, signal.stop_loss, signal.take_profit_1, signal.take_profit_2, signal.summary);
 
    if(!signal.approved || signal.action == "WAIT")
       return true;
+
+   if(!allow_execution)
+   {
+      Print("XAU Sniper AI M5: valid analysis is being monitored, but execution waits for a newly closed M5 candle.");
+      return true;
+   }
 
    return ExecuteSignal(signal, tick);
 }
@@ -168,15 +201,20 @@ void ResetSignal(TradeSignal &signal)
    signal.stop_loss = 0.0;
    signal.take_profit_1 = 0.0;
    signal.take_profit_2 = 0.0;
+   signal.summary = "";
+   signal.trend = "neutral";
+   signal.liquidity_sweep = "none";
+   signal.choch = "none";
+   signal.bos = "none";
+   signal.fvg_side = "none";
+   signal.fvg_low = 0.0;
+   signal.fvg_high = 0.0;
 }
 
 bool BuildAnalyzePayload(const MqlTick &tick, string &payload)
 {
-   string m1, m5, m15, h1;
-   if(!BuildRatesJson(PERIOD_M1, InpM1Bars, m1)) return false;
+   string m5;
    if(!BuildRatesJson(PERIOD_M5, InpM5Bars, m5)) return false;
-   if(!BuildRatesJson(PERIOD_M15, InpM15Bars, m15)) return false;
-   if(!BuildRatesJson(PERIOD_H1, InpH1Bars, h1)) return false;
 
    double daily_pnl = CalculateAccountDailyPnl();
    int open_positions = PositionsTotal();
@@ -185,13 +223,11 @@ bool BuildAnalyzePayload(const MqlTick &tick, string &payload)
    payload = "{";
    payload += "\"market\":{";
    payload += "\"symbol\":\"" + JsonEscape(_Symbol) + "\",";
+   payload += "\"timeframe\":\"M5\",";
    payload += "\"bid\":" + PriceJson(tick.bid) + ",";
    payload += "\"ask\":" + PriceJson(tick.ask) + ",";
    payload += "\"spread\":" + PriceJson(spread) + ",";
-   payload += "\"m1\":" + m1 + ",";
-   payload += "\"m5\":" + m5 + ",";
-   payload += "\"m15\":" + m15 + ",";
-   payload += "\"h1\":" + h1;
+   payload += "\"m5\":" + m5;
    payload += "},";
 
    payload += "\"policy\":{";
@@ -309,6 +345,14 @@ bool ParseSignal(const string json, TradeSignal &signal)
       return false;
    JsonGetString(json, "entry_type", signal.entry_type);
    JsonGetInt(json, "confidence", signal.confidence);
+   JsonGetString(json, "summary", signal.summary);
+   JsonGetString(json, "trend", signal.trend);
+   JsonGetString(json, "liquidity_sweep", signal.liquidity_sweep);
+   JsonGetString(json, "choch", signal.choch);
+   JsonGetString(json, "bos", signal.bos);
+   JsonGetString(json, "side", signal.fvg_side);
+   JsonGetDouble(json, "low", signal.fvg_low);
+   JsonGetDouble(json, "high", signal.fvg_high);
 
    if(signal.action != "WAIT")
    {
@@ -415,6 +459,44 @@ bool ExecuteSignal(const TradeSignal &signal, const MqlTick &tick)
                signal.action, signal.entry_type, volume, entry, sl, tp,
                trade.ResultOrder(), trade.ResultDeal());
    return true;
+}
+
+bool IsGoldSymbol()
+{
+   string symbol = _Symbol;
+   StringToUpper(symbol);
+   StringReplace(symbol, "/", "");
+   return (StringFind(symbol, "XAUUSD") == 0);
+}
+
+void UpdateDashboard(const TradeSignal &signal, const MqlTick &tick, const bool fresh_m5)
+{
+   string algo = ((bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) && (bool)MQLInfoInteger(MQL_TRADE_ALLOWED)) ? "ON" : "OFF";
+   string fvg = signal.fvg_side;
+   if(signal.fvg_low > 0.0 && signal.fvg_high > 0.0)
+      fvg += " " + DoubleToString(signal.fvg_low, _Digits) + " - " + DoubleToString(signal.fvg_high, _Digits);
+
+   string trade_line = "Entry: --   SL: --   TP1: --   TP2: --";
+   if(signal.action != "WAIT")
+      trade_line = "Entry: " + DoubleToString(signal.entry, _Digits) +
+                   "   SL: " + DoubleToString(signal.stop_loss, _Digits) +
+                   "   TP1(2R): " + DoubleToString(signal.take_profit_1, _Digits) +
+                   "   TP2(3R): " + DoubleToString(signal.take_profit_2, _Digits);
+
+   Comment(
+      "XAU SNIPER AI | GOLD M5 ONLY\n",
+      "API: ", g_api_ok ? "CONNECTED" : "DISCONNECTED", "   Algo Trading: ", algo, "\n",
+      "Bid/Ask: ", DoubleToString(tick.bid, _Digits), " / ", DoubleToString(tick.ask, _Digits),
+      "   Spread: ", DoubleToString(tick.ask - tick.bid, _Digits), "\n",
+      "M5 Trend: ", signal.trend, "   Sweep: ", signal.liquidity_sweep, "\n",
+      "CHoCH: ", signal.choch, "   BOS: ", signal.bos, "\n",
+      "FVG: ", fvg, "\n",
+      "ACTION: ", signal.action, "   Approved: ", signal.approved ? "YES" : "NO",
+      "   Confidence: ", IntegerToString(signal.confidence), "%\n",
+      trade_line, "\n",
+      "Execution candle: ", fresh_m5 ? "NEW CLOSED M5" : "MONITOR ONLY", "\n",
+      "Reason: ", signal.summary
+   );
 }
 
 bool TradingEnvironmentAllowed()
@@ -532,7 +614,7 @@ void CancelStalePendingOrders()
    if(InpPendingExpiryBars <= 0)
       return;
 
-   long max_age = (long)InpPendingExpiryBars * PeriodSeconds(PERIOD_M1);
+   long max_age = (long)InpPendingExpiryBars * PeriodSeconds(PERIOD_M5);
    datetime now = TimeCurrent();
 
    for(int i = OrdersTotal() - 1; i >= 0; --i)
