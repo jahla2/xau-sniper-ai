@@ -13,7 +13,8 @@ Rule-first XAUUSD scalping engine for MT5 using SMC/ICT concepts with optional C
 - `LONG`, `SHORT`, or `WAIT` trade plans
 - Hard risk gate for spread, RR, position count and daily loss
 - Optional Claude structured-output review
-- FastAPI endpoint for future MT5 Expert Advisor integration
+- FastAPI endpoint consumed by the MT5 Expert Advisor
+- Demo-first MT5 auto-execution EA with risk sizing, SL, TP1/TP2 management, duplicate protection and stale-order cancellation
 - Automated tests + GitHub Actions CI
 
 ## Architecture
@@ -50,8 +51,8 @@ pytest
 
 Copy `.env.example` values into your environment and set `ANTHROPIC_API_KEY`. The default model is `claude-sonnet-5-5`. Never put a real API key in Git.
 
-## MT5 note
+## MT5 execution layer
 
-The EA will communicate with the local service using MQL5 `WebRequest`. MT5 must explicitly allow the service URL under **Tools -> Options -> Expert Advisors -> Allow WebRequest for listed URL**. The MT5 Strategy Tester does not execute `WebRequest`, so deterministic strategy testing is kept separate from the optional AI review.
+The EA is implemented at `mt5/Experts/XAU_Sniper_AI.mq5`. It communicates with the local service using MQL5 `WebRequest`. MT5 must explicitly allow the service URL under **Tools -> Options -> Expert Advisors -> Allow WebRequest for listed URL**. The MT5 Strategy Tester does not execute `WebRequest`, so deterministic strategy testing is kept separate from the optional AI review.
 
-See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the staged implementation and acceptance criteria.
+See [docs/MT5_SETUP.md](docs/MT5_SETUP.md) for installation/configuration and [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the staged roadmap and acceptance criteria.
