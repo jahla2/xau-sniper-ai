@@ -30,14 +30,16 @@ Build a rule-first XAUUSD scalping system for MT5 that detects SMC/ICT setups, r
 - Optional Claude structured-output reviewer.
 - Unit/API tests and GitHub Actions.
 
-## Phase 2 — MT5 EA integration
-- `XAU_Sniper_AI.mq5` Expert Advisor.
-- Collect closed candles only; avoid decisions on incomplete candles.
-- POST snapshot to `http://127.0.0.1:8765/analyze` via `WebRequest`.
-- Parse response and display dashboard.
-- Demo-only default.
-- One position per symbol; magic number and duplicate-order protection.
-- Auto entry, SL, TP, break-even and stale-order cancellation.
+## Phase 2 — MT5 EA integration (implemented foundation)
+- `mt5/Experts/XAU_Sniper_AI.mq5` Expert Advisor.
+- Collects closed candles only; avoids decisions on incomplete candles.
+- POSTs snapshot to `http://127.0.0.1:8765/analyze` via `WebRequest`.
+- Parses approved `LONG` / `SHORT` / `WAIT` responses.
+- Demo-first default; real-account execution requires an explicit opt-in.
+- One bot position/order per symbol via magic number and duplicate protection.
+- Risk-based volume sizing from entry-to-SL distance.
+- Auto MARKET/LIMIT entry, SL, TP2, TP1 partial close + break-even, and stale-order cancellation.
+- Remaining: richer on-chart dashboard and MetaEditor compile/terminal forward validation on the target Windows MT5 install.
 
 ## Phase 3 — Backtest harness
 Because MT5 `WebRequest` is unavailable in Strategy Tester, export/replay historical candles through the deterministic Python engine and separately implement/reuse the same core rules in the EA test mode. Track win rate, expectancy, profit factor, maximum drawdown, MAE/MFE, session and setup subtype.
